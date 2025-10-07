@@ -1,64 +1,205 @@
+
 pipeline {
     agent any
 
-    parameters {
-        choice(
-            name: 'ACTION',
-            choices: ['apply', 'destroy'],
-            description: 'Select the action to perform'
-        )
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
-    environment {
-        TF_IN_AUTOMATION = "true"
+    tools {
+        maven 'maven3'
+        jdk 'jdk-17'
     }
 
     stages {
-        stage('Checkout') {
+        stage('git checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/AniketT-003/eks-cluster-deployment-.git'
+                git branch: 'master', url: 'https://github.com/AniketT-003/Ekart.git'
             }
         }
 
-        stage('Terraform Init') {
+        stage('compile') {
             steps {
-                sh 'terraform init -reconfigure'
+                sh "mvn compile"
             }
         }
 
-        stage('Terraform Plan') {
+        stage('unit tests') {
             steps {
-                sh 'terraform plan'
+                sh "mvn test -DskipTests=true"
             }
         }
 
-        stage('Terraform Action') {
+        stage('SonarQube analysis') {
+            steps {
+                withSonarQubeEnv('sonar-token') {
+                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.java.binaries=target/classes"
+                }
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                    odcInstallation: 'DC'
+             }
+        }
+        }
+
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+
+        stage('deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
+                }
+            }
+        }
+        
+
+        stage('build and Tag docker image') {
             steps {
                 script {
-                    if (params.ACTION == 'apply') {
-                        echo 'Executing Terraform Apply...'
-                        sh 'terraform apply --auto-approve'
-                    } else if (params.ACTION == 'destroy') {
-                        echo 'Executing Terraform Destroy...'
-                        sh 'terraform destroy --auto-approve'
-                    } else {
-                        error('Unknown action specified!')
+                        sh "docker build -t aniket0003/ekart:latest -f docker/Dockerfile ."
                     }
+            }
+        }
+
+        stage('Push image to Hub'){
+            steps{
+                script{
+                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                   sh 'docker login -u aniket0003 -p ${dockerhubpwd}'}
+                   sh 'docker push aniket0003/ekart:latest'
+                }
+            }
+        }
+        stage('EKS and Kubectl configuration'){
+            steps{
+                script{
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name cluster-deploy'
+                }
+            }
+        }
+        stage('Deploy to k8s'){
+            steps{
+                script{
+                    sh 'kubectl apply -f deploymentservice.yml'
                 }
             }
         }
     }
 
-    post {
-        always {
-            echo 'Cleaning up workspace...'
-            deleteDir()
+}
+
+
+pipeline {
+    agent any
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
+    }
+
+    tools {
+        maven 'maven3'
+        jdk 'jdk-17'
+    }
+
+    stages {
+        stage('git checkout') {
+            steps {
+                git branch: 'master', url: 'https://github.com/AniketT-003/Ekart.git'
+            }
         }
-        success {
-            echo 'Terraform pipeline executed successfully!'
+
+        stage('compile') {
+            steps {
+                sh "mvn compile"
+            }
         }
-        failure {
-            echo 'Terraform pipeline failed. Check logs for details.'
+
+        stage('unit tests') {
+            steps {
+                sh "mvn test -DskipTests=true"
+            }
+        }
+
+        stage('SonarQube analysis') {
+            steps {
+                withSonarQubeEnv('sonar-token') {
+                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.java.binaries=target/classes"
+                }
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                    odcInstallation: 'DC'
+             }
+        }
+        }
+
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+
+        stage('deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
+                }
+            }
+        }
+        
+
+        stage('build and Tag docker image') {
+            steps {
+                script {
+                        sh "docker build -t aniket0003/ekart:latest -f docker/Dockerfile ."
+                    }
+            }
+        }
+
+        stage('Push image to Hub'){
+            steps{
+                script{
+                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                   sh 'docker login -u aniket0003 -p ${dockerhubpwd}'}
+                   sh 'docker push aniket0003/ekart:latest'
+                }
+            }
+        }
+        stage('EKS and Kubectl configuration'){
+            steps{
+                script{
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name cluster-deploy'
+                }
+            }
+        }
+        stage('Deploy to k8s'){
+            steps{
+                script{
+                    sh 'kubectl apply -f deploymentservice.yml'
+                }
+            }
         }
     }
+
 }
