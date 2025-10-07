@@ -9,42 +9,56 @@ pipeline {
         )
     }
 
+    environment {
+        TF_IN_AUTOMATION = "true"
+    }
+
     stages {
         stage('Checkout') {
             steps {
-                git 'https://github.com/AniketT-003/eks-cluster-deployment-.git'
-            }
-        }
-    
-        stage ("terraform init") {
-            steps {
-                sh ("terraform init -reconfigure") 
-            }
-        }
-        
-        stage ("plan") {
-            steps {
-                sh ('terraform plan') 
+                git branch: 'main', url: 'https://github.com/AniketT-003/eks-cluster-deployment-.git'
             }
         }
 
-        stage (" Action") {
+        stage('Terraform Init') {
+            steps {
+                sh 'terraform init -reconfigure'
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                sh 'terraform plan'
+            }
+        }
+
+        stage('Terraform Action') {
             steps {
                 script {
-                    switch (params.ACTION) {
-                        case 'apply':
-                            echo 'Executing Apply...'
-                            sh "terraform apply --auto-approve"
-                            break
-                        case 'destroy':
-                            echo 'Executing Destroy...'
-                            sh "terraform destroy --auto-approve"
-                            break
-                        default:
-                            error 'Unknown action'
+                    if (params.ACTION == 'apply') {
+                        echo 'Executing Terraform Apply...'
+                        sh 'terraform apply --auto-approve'
+                    } else if (params.ACTION == 'destroy') {
+                        echo 'Executing Terraform Destroy...'
+                        sh 'terraform destroy --auto-approve'
+                    } else {
+                        error('Unknown action specified!')
                     }
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up workspace...'
+            deleteDir()
+        }
+        success {
+            echo 'Terraform pipeline executed successfully!'
+        }
+        failure {
+            echo 'Terraform pipeline failed. Check logs for details.'
         }
     }
 }
